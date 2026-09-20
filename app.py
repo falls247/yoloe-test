@@ -342,7 +342,6 @@ Visual Prompt タブでは、Ultralytics が実際に使う処理に合わせて
             interactive=False,
             elem_id="bbox-editor",
             height=620,
-            show_download_button=False,
         )
         bbox_status = gr.Markdown("参考画像をアップロードするとBBox指定を開始できる。")
 
