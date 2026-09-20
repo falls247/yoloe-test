@@ -3,13 +3,13 @@
 YOLOE の 3 prompting mode を同じ UI で試し、特に Visual Prompt の処理を段階可視化するローカル実験環境。
 
 - Text Prompt: クラス名から prompt embedding を生成して動画推論
-- Visual Prompt: 参考画像 + bbox から Visual Prompt embedding を生成し動画へ適用
+- Visual Prompt: 参考画像 + ユーザー指定BBoxから Visual Prompt embedding を生成し動画へ適用
 - Prompt-Free: `*-seg-pf.pt` の内蔵 vocabulary を使ってプロンプトなし推論
 - 動画出力: bbox / instance mask / confidence
 - 計測: 処理フレーム数、wall time、effective FPS、平均 model inference time、検出数
 - Visual Prompt可視化:
-  - 参考画像 + bbox
-  - ROI crop（説明用）
+  - 参考画像 + ユーザー指定BBox
+  - Prompt対象領域オーバーレイ
   - letterbox と変換後 bbox
   - YOLOE が SAVPE へ渡す 1/8 解像度 visual prompt tensor
   - SAVPE 後に `model.model.pe` へ保持される prompt embedding
@@ -97,7 +97,6 @@ uv インストール済みなら以下だけで起動可能。
 ```bash
 git clone https://github.com/falls247/yoloe-test.git
 cd yoloe-test
-git checkout feature/yoloe-playground
 uv python install 3.12
 uv sync
 uv run python app.py
@@ -109,48 +108,65 @@ YOLOE-26 は `ultralytics>=8.4.0` が必要。Text Prompt の初回処理では 
 
 ## Visual Prompt入力
 
-1行1 bbox。
+BBox座標のテキスト手入力は廃止。参考画像をアップロード後、画像上で任意の範囲を指定する。
 
-```text
-x1,y1,x2,y2,class_id[,表示ラベル]
-```
+### BBox設定手順
 
-例:
+1. Visual Prompt タブで参考画像をアップロード
+2. `class_id` と表示用 `label` を設定
+3. BBoxエディタ画像上で **対角2点を順にクリック**
+   - 1回目: BBoxの1つ目の角
+   - 2回目: 対角側の角
+4. 白枠でBBoxが確定
+5. 必要なら複数BBoxを追加
+6. `Prompt前処理だけ確認` または `Visual Promptで動画実行`
 
-```text
-50,80,180,260,0,part-A
-220,90,350,280,1,part-B
-370,100,470,240,1,part-B
-```
+座標はクリック位置から元画像pixel座標で自動取得するため、座標入力は不要。
 
-制約:
+### 複数BBox / class_id
 
-- bboxは参考画像の pixel 座標、`xyxy`
 - `class_id` は `0,1,2...` の連番
-- 同じ `class_id` の複数 bbox は1つの visual prompt tensorへ OR 結合
+- 同じ対象の別見本は同じ `class_id` を指定
+- 同じ `class_id` の複数BBoxは1つの visual prompt tensorへ OR 結合
+- 異なる対象を同時に探す場合は `class_id=0`, `class_id=1` のように分ける
 - 表示ラベルは UI/結果動画用。YOLOE 内部の Visual Prompt class 名は `object0`, `object1`...
+- `最後のBBoxを削除` と `BBoxを全削除` で修正可能
+
+BBox面積が画像全体の1%未満の場合、部品全体ではなく部分特徴だけをPrompt化していないか警告を表示する。
 
 ## Visual Promptの可視化が示すもの
 
-アプリは推論時に `rect=False` を固定し、参考画像を `imgsz × imgsz` の正方形へ letterbox する。bboxも同じ gain/padding で座標変換する。
+アプリは推論時に `rect=False` を固定し、参考画像を `imgsz × imgsz` の正方形へ letterbox する。BBoxも同じ gain/padding で座標変換する。
 
 その後、Ultralytics YOLOE の Visual Prompt predictor と同じ意味になるよう bbox を 1/8 解像度へ縮小し、二値 prompt mask へ rasterize。同一 class の bbox は OR 結合される。
 
 ```text
 reference image
-  └─ bbox (xyxy)
-      └─ letterbox + bbox座標変換
-          └─ 1/8 binary visual prompt tensor
-              └─ SAVPE
-                  └─ visual prompt embedding (model.model.pe)
-                      └─ target video frames
+  └─ user selected bbox
+      └─ selected prompt region
+          └─ letterbox + bbox座標変換
+              └─ 1/8 binary visual prompt tensor
+                  └─ SAVPE
+                      └─ visual prompt embedding (model.model.pe)
+                          └─ target video frames
 ```
 
-### 正確に可視化している範囲
+### 可視化項目
 
-- letterbox後の bbox
-- 1/8 visual prompt tensor
-- SAVPE 後の最終 prompt embedding
+1. **Reference + user BBox**  
+   ユーザーが画像上で指定した実BBox。
+
+2. **Selected Prompt Region**  
+   BBox外を暗くし、Promptとして有効にした領域を明示。これはcrop画像入力ではなく、元画像とPrompt Maskの関係を説明する表示。
+
+3. **Letterbox + scaled bbox**  
+   モデル入力サイズへ変換後の参考画像とBBox。
+
+4. **Exact visual prompt tensor**  
+   SAVPEへ渡る1/8解像度の二値Prompt Mask。
+
+5. **Final prompt embedding**  
+   SAVPE後に `model.model.pe` へ保持される実Visual Prompt embedding。
 
 ### 可視化していない範囲
 
