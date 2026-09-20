@@ -1,4 +1,3 @@
-
 # YOLOE Mode Lab
 
 YOLOE の 3 prompting mode を同じ UI で試し、特に Visual Prompt の処理を段階可視化するローカル実験環境。
@@ -26,45 +25,87 @@ YOLOE の 3 prompting mode を同じ UI で試し、特に Visual Prompt の処�
 
 デフォルトは `yoloe-26s-seg.pt`。Prompt-Free タブでは `yoloe-26s-seg-pf.pt` のように同スケールへ自動変換する。
 
-## セットアップ
+## セットアップ（uv）
 
-Python 3.11/3.12 推奨。
+Python 3.12 を使用。リポジトリには `.python-version` と `pyproject.toml` を含めている。
 
-### 1. 仮想環境
+### 1. uv をインストール
 
-```bash
-python -m venv .venv
-source .venv/bin/activate   # WSL / Linux
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-```
+すでに `uv --version` が通る場合はスキップ。
 
-### 2. PyTorch
-
-GPUを使う場合、先に利用環境の CUDA に合う PyTorch を入れることを推奨。
+WSL / Linux:
 
 ```bash
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 3. 依存関係
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+### 2. Python 3.12 と仮想環境を作成
 
 ```bash
-pip install -r requirements.txt
+uv python install 3.12
+uv sync
 ```
 
-YOLOE-26 は `ultralytics>=8.4.0` が必要。Text Prompt の初回 `set_classes()` 相当処理では text encoder が追加ダウンロードされる。Visual Prompt / Prompt-Free は text encoder 不要。
+`uv sync` でプロジェクト直下に `.venv` が自動作成され、`pyproject.toml` の依存関係がインストールされる。仮想環境の手動 activate は不要。
+
+### 3. GPU確認
+
+```bash
+uv run python -c "import torch; print(torch.__version__); print('CUDA:', torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+```
+
+CUDA が `False` の場合、PyTorch のインストール内容と NVIDIA driver / CUDA 環境を確認。
 
 ### 4. 起動
 
 ```bash
-python app.py
+uv run python app.py
 ```
+
+または起動スクリプト:
+
+WSL / Linux:
+
+```bash
+bash run.sh
+```
+
+Windows PowerShell:
+
+```powershell
+.\run.ps1
+```
+
+`run.sh` / `run.ps1` は内部で `uv sync` を実行してからアプリを起動する。
 
 ブラウザ:
 
 ```text
 http://localhost:7860
 ```
+
+### 最短起動
+
+uv インストール済みなら以下だけで起動可能。
+
+```bash
+git clone https://github.com/falls247/yoloe-test.git
+cd yoloe-test
+git checkout feature/yoloe-playground
+uv python install 3.12
+uv sync
+uv run python app.py
+```
+
+YOLOE-26 は `ultralytics>=8.4.0` が必要。Text Prompt の初回処理では text encoder が追加ダウンロードされる。Visual Prompt / Prompt-Free は text encoder 不要。
+
+`requirements.txt` は pip を使う場合の互換用として残している。通常は `uv sync` を使用する。
 
 ## Visual Prompt入力
 
