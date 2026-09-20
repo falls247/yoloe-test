@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import cv2
@@ -81,6 +80,35 @@ def rasterize_prompt_masks(
     return visuals
 
 
+def _selected_region_overlay(
+    image: np.ndarray,
+    boxes: np.ndarray,
+    cls_ids: np.ndarray,
+    labels: dict[int, str],
+) -> np.ndarray:
+    """Show the full reference image while making the prompt-active regions explicit."""
+    dimmed = np.clip(image.astype(np.float32) * 0.22, 0, 255).astype(np.uint8)
+    out = dimmed.copy()
+
+    for box, cid in zip(boxes, cls_ids):
+        x1, y1, x2, y2 = [int(round(v)) for v in box]
+        out[y1:y2, x1:x2] = image[y1:y2, x1:x2]
+        cv2.rectangle(out, (x1, y1), (x2, y2), (255, 255, 255), 3)
+        name = labels.get(int(cid), f"object{int(cid)}")
+        cv2.putText(
+            out,
+            f"c{int(cid)} {name}",
+            (x1, max(20, y1 - 7)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.62,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+    return out
+
+
 def _embedding_image(embedding: np.ndarray, width: int = 1000, row_height: int = 80) -> Image.Image:
     arr = np.asarray(embedding, dtype=np.float32)
     if arr.ndim == 3:
@@ -95,7 +123,7 @@ def _embedding_image(embedding: np.ndarray, width: int = 1000, row_height: int =
     h = max(row_height * arr.shape[0], 80)
     heat = cv2.resize(norm, (width, h), interpolation=cv2.INTER_NEAREST)
     heat = cv2.cvtColor(heat, cv2.COLOR_GRAY2BGR)
-    heat = _annotate_bgr(heat, f"Exact prompt embedding  shape={tuple(arr.shape)}  min={lo:.4f} max={hi:.4f}")
+    heat = _annotate_bgr(heat, f"5. Exact prompt embedding shape={tuple(arr.shape)} min={lo:.4f} max={hi:.4f}")
     return _to_pil(heat)
 
 
@@ -131,43 +159,86 @@ def build_visual_gallery(
     annotated = image.copy()
     for box, cid in zip(boxes, cls_ids):
         x1, y1, x2, y2 = map(int, box)
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), (255, 255, 255), 2)
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), (255, 255, 255), 3)
         txt = f"c{int(cid)}"
         if int(cid) in labels:
             txt += f":{labels[int(cid)]}"
-        cv2.putText(annotated, txt, (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
-    gallery.append((_to_pil(_annotate_bgr(annotated, "1. Reference image + user bbox")), "Reference + bbox"))
+        cv2.putText(
+            annotated,
+            txt,
+            (x1, max(20, y1 - 7)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.62,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+    gallery.append(
+        (
+            _to_pil(_annotate_bgr(annotated, "1. Reference image + USER selected bbox")),
+            "Reference + user BBox",
+        )
+    )
 
-    for i, (box, cid) in enumerate(zip(boxes, cls_ids)):
-        x1, y1, x2, y2 = map(int, box)
-        crop = image[y1:y2, x1:x2].copy()
-        name = labels.get(int(cid), f"object{int(cid)}")
-        gallery.append((_to_pil(_annotate_bgr(crop, f"2. ROI #{i} class={cid} {name}")), f"ROI #{i}"))
+    selected = _selected_region_overlay(image, boxes, cls_ids, labels)
+    gallery.append(
+        (
+            _to_pil(_annotate_bgr(selected, "2. Prompt-active region (outside is dimmed for explanation)")),
+            "Selected Prompt Region",
+        )
+    )
 
     letterboxed, scaled_boxes, gain, pad = letterbox_visual(image, boxes, imgsz)
     stage = letterboxed.copy()
     for box, cid in zip(scaled_boxes, cls_ids):
         x1, y1, x2, y2 = map(int, box)
-        cv2.rectangle(stage, (x1, y1), (x2, y2), (255,255,255), 2)
-        cv2.putText(stage, f"c{int(cid)}", (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
-    gallery.append((_to_pil(_annotate_bgr(stage, f"3. Letterbox {imgsz}x{imgsz} gain={gain:.4f} pad={pad}")), "Letterbox + scaled bbox"))
+        cv2.rectangle(stage, (x1, y1), (x2, y2), (255, 255, 255), 3)
+        cv2.putText(
+            stage,
+            f"c{int(cid)}",
+            (x1, max(20, y1 - 7)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.62,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+    gallery.append(
+        (
+            _to_pil(
+                _annotate_bgr(
+                    stage,
+                    f"3. Letterbox {imgsz}x{imgsz} gain={gain:.4f} pad={pad}",
+                )
+            ),
+            "Letterbox + scaled bbox",
+        )
+    )
 
     visuals = rasterize_prompt_masks(scaled_boxes, cls_ids, imgsz)
     for cid in range(visuals.shape[0]):
         mask = (visuals[cid] * 255).astype(np.uint8)
         display = cv2.resize(mask, (imgsz, imgsz), interpolation=cv2.INTER_NEAREST)
         display = cv2.cvtColor(display, cv2.COLOR_GRAY2BGR)
-        display = _annotate_bgr(display, f"4. Exact visual prompt tensor class={cid} shape={visuals[cid].shape}")
+        display = _annotate_bgr(
+            display,
+            f"4. Exact visual prompt tensor class={cid} shape={visuals[cid].shape}",
+        )
         gallery.append((_to_pil(display), f"Prompt mask class {cid}"))
 
     details = {
         "reference_size": {"width": int(image.shape[1]), "height": int(image.shape[0])},
+        "user_bboxes_xyxy": boxes.round(3).tolist(),
+        "class_ids": [int(x) for x in cls_ids.tolist()],
         "letterbox_size": [int(imgsz), int(imgsz)],
         "gain": float(gain),
         "padding_left_top": [int(pad[0]), int(pad[1])],
         "scaled_bboxes_xyxy": scaled_boxes.round(3).tolist(),
         "prompt_tensor_shape": list(visuals.shape),
         "prompt_nonzero_pixels": [int((m > 0).sum()) for m in visuals],
+        "prompt_area_ratio_per_class": [
+            round(float((m > 0).mean()), 6) for m in visuals
+        ],
     }
 
     if embedding is not None:
