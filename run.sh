@@ -1,3 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
-python app.py
+uv sync
+exec uv run python app.py
